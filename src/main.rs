@@ -10,7 +10,7 @@
 
 use bevy::{prelude::*, render::camera::Camera2d,
     math::{const_vec3, const_vec2},
-    sprite::collide_aabb::{collide, Collision},};
+    sprite::collide_aabb::{collide},};
 use rand::{thread_rng, Rng};
 
 // Defines the amount of time that should elapse between each physics step.
@@ -32,7 +32,8 @@ fn main() {
         .add_plugins(DefaultPlugins)
         .add_startup_system(setup)
         .add_system(animate_sprite)
-        .add_event::<CollisionEvent>() ////////// not used.  Breakout uses this for explosion sound.
+        .add_event::<CollisionEvent>() // explosion catches this
+        .add_system(explosion)
         .add_system(check_for_collisions) 
         .add_system(move_alien_classic)
         .add_system(move_alien_circle)
@@ -44,7 +45,9 @@ fn main() {
 }
 
 #[derive(Default)]
-struct CollisionEvent;
+struct CollisionEvent {
+    pos:Vec3
+}
 
 #[derive(Clone,Copy)]
 enum MarchDir {
@@ -171,15 +174,20 @@ struct AnimationTimer {
     // 0 is the first image in the spritesheet
     // animation will start at start_index, and end at start_index + frames-1
     pub start_index: u32,
+    pub repeat : bool,
 }
 
 fn animate_sprite(
+    mut commands: Commands,
     time: Res<Time>,
-    mut query: Query<(&mut AnimationTimer, &mut TextureAtlasSprite)>,
+    mut query: Query<(&mut AnimationTimer, &mut TextureAtlasSprite, Entity)>,
 ) {
-    for (mut anime, mut sprite) in query.iter_mut() {
+    for (mut anime, mut sprite, entity) in query.iter_mut() {
         anime.timer.tick(time.delta());
         if anime.timer.just_finished() {
+            if ! anime.repeat && anime.frames == sprite.index as u32 - anime.start_index + 1 {
+                commands.entity(entity).despawn();
+            }
             //let texture_atlas = texture_atlases.get(texture_atlas_handle).unwrap();
             sprite.index = (((sprite.index - anime.start_index as usize) + 1)
                 % anime.frames as usize)
@@ -252,6 +260,7 @@ fn move_player(
                 timer: Timer::from_seconds(0.1, true),
                 frames: 5,
                 start_index: 0,
+                repeat: true,
             });
         }
     }
@@ -309,25 +318,42 @@ fn check_for_collisions(
             );
             if let Some(_/*collision*/) = collision {
                 // Sends a collision event so that other systems can react to the collision
-                collision_events.send_default();
-                commands.spawn().insert_bundle(explosion(transform.translation));
+                collision_events.send(CollisionEvent { pos: transform.translation });
                 commands.entity(collider_entity).despawn();
             }
         }
     }
 }
-fn explosion(pos : Vec3) -> SpriteBundle {
-    SpriteBundle {
-        transform: Transform {
-            translation: pos,
-            scale: Vec3::splat(20.0),
-            ..default()
-        },
-        sprite: Sprite {
-            color: Color::rgb(1.0, 5.0, 0.0),
-            ..default()
-        },
-        ..default()
+
+/// event handler when collisions happen.
+fn explosion(
+    mut commands: Commands,
+    bolt_atlas_h: Res<Handle<TextureAtlas>>,
+    mut event_reader: EventReader<CollisionEvent>,
+)  {
+    for collision_event in event_reader.iter() {
+        let pos = collision_event.pos;
+        commands.spawn().insert_bundle(
+            SpriteSheetBundle {
+                texture_atlas: bolt_atlas_h.clone(),
+                transform: Transform { 
+                    translation: pos,
+                    scale: Vec3::splat(2.0),
+                    ..default()
+                },
+                sprite: TextureAtlasSprite { 
+                    color: Color::rgb(1.0, 0.5, 0.0), 
+                    index: 0,
+                    ..Default::default() 
+                },
+                ..Default::default()
+            })        //.insert(Collider)
+        .insert(AnimationTimer {
+            timer: Timer::from_seconds(0.1, true),
+            frames: 5,
+            start_index: 0,
+            repeat: false,
+        });
     }
 }
 
@@ -378,6 +404,7 @@ fn setup(
             timer: Timer::from_seconds(0.5, true),
             frames: 2,
             start_index: 0,
+            repeat: true,
         })
         .insert(AlienMoves::new())
         .insert(Classic)
@@ -427,6 +454,7 @@ fn spawn_alien(
             timer: Timer::from_seconds(duration, true),
             frames,
             start_index,
+            repeat: true,
         })
         ////////////// Movement is setup here
         .insert(AlienMoves::new())
