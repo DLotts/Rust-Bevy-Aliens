@@ -202,7 +202,8 @@ struct Player;
 #[derive(Component)]
 struct Collider;
 
-const BOLT_COLOR: Color = Color::rgb(1.0, 0.5, 0.5);
+const EXPLOSION_SIZE:f32 = 8.0;
+const BOLT_COLOR: Color = Color::rgb(1.0, 0.5, 0.0);
 const PLAYER_COLOR: Color = Color::rgb(0.3, 0.3, 0.7);
 const PLAYER_Y:f32 = -WIN_HEIGHT/2.0 + 100.0;
 // These constants are defined in `Transform` units.
@@ -215,8 +216,8 @@ const PLAYER_SPEED: f32 = 500.0;
 fn move_player(
     mut commands: Commands,
     keyboard_input: Res<Input<KeyCode>>,
-    mut bolt_exists: ResMut<BoltExists>,
-    bolt_atlas_h: Res<Handle<TextureAtlas>>,
+    bolt_exists: ResMut<BoltExists>,
+    atlases: Res<Atlases>,
     //mut texture_atlases: ResMut<Assets<TextureAtlas>>,  //////TODO
     mut query: Query<&mut Transform, With<Player>>,
 ) {
@@ -245,13 +246,13 @@ fn move_player(
         {
             //*bolt_exists = BoltExists(true);// 👾
             commands.spawn().insert_bundle(SpriteSheetBundle {
-                texture_atlas: bolt_atlas_h.clone(),
+                texture_atlas: atlases.bolt.clone(),
                 transform: Transform { 
                     translation: player_transform.translation,
                     scale: BOLT_SIZE,
                     ..default()
                 },
-                sprite: TextureAtlasSprite::new(0),
+                sprite: TextureAtlasSprite {index:0, color: BOLT_COLOR, ..Default::default() },
                 ..Default::default()
             })
             .insert(Bolt)
@@ -301,11 +302,11 @@ fn move_bolt(
 
 fn check_for_collisions(
     mut commands: Commands,
-    mut bolt_query: Query<(&mut Velocity, &Transform), With<Bolt>>,
+    bolt_query: Query<&Transform, With<Bolt>>,
     collider_query: Query<(Entity, &Transform), With<Collider>>,
     mut collision_events: EventWriter<CollisionEvent>,
 ) {
-    for (mut bolt_velocity, bolt_transform) in bolt_query.iter() {
+    for bolt_transform in bolt_query.iter() {
         let bolt_size = bolt_transform.scale.truncate();
 
         // check collision with walls
@@ -328,21 +329,21 @@ fn check_for_collisions(
 /// event handler when collisions happen.
 fn explosion(
     mut commands: Commands,
-    bolt_atlas_h: Res<Handle<TextureAtlas>>,
+    atlases: Res<Atlases>,
     mut event_reader: EventReader<CollisionEvent>,
 )  {
     for collision_event in event_reader.iter() {
         let pos = collision_event.pos;
         commands.spawn().insert_bundle(
             SpriteSheetBundle {
-                texture_atlas: bolt_atlas_h.clone(),
+                texture_atlas: atlases.explosion.clone(),
                 transform: Transform { 
                     translation: pos,
-                    scale: Vec3::splat(2.0),
+                    scale: Vec3::splat(EXPLOSION_SIZE),
                     ..default()
                 },
                 sprite: TextureAtlasSprite { 
-                    color: Color::rgb(1.0, 0.5, 0.0), 
+                    color: Color::rgb(1.0, 1.0, 0.0), 
                     index: 0,
                     ..Default::default() 
                 },
@@ -350,13 +351,17 @@ fn explosion(
             })        //.insert(Collider)
         .insert(AnimationTimer {
             timer: Timer::from_seconds(0.1, true),
-            frames: 5,
+            frames: 4,
             start_index: 0,
             repeat: false,
         });
     }
 }
 
+struct Atlases {
+    bolt : Handle<TextureAtlas>,
+    explosion : Handle<TextureAtlas>,
+}
 fn setup(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
@@ -370,7 +375,12 @@ fn setup(
     let texture_atlas = TextureAtlas::from_grid(texture_handle, Vec2::new(7.0, 12.0), 5, 1);
     let bolt_atlas_h = texture_atlases.add(texture_atlas);
 
-    commands.insert_resource(bolt_atlas_h);
+    let texture_handle = asset_server.load("explosion_bl.png"); 
+    let texture_atlas = TextureAtlas::from_grid(texture_handle, Vec2::new(12.0, 12.0), 4, 1);
+    let expl_atlas_h = texture_atlases.add(texture_atlas);
+
+
+    commands.insert_resource(Atlases{bolt:bolt_atlas_h, explosion:expl_atlas_h});
 
     commands.spawn_bundle(OrthographicCameraBundle::new_2d());
 
