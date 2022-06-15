@@ -17,6 +17,7 @@ use rand::{thread_rng, Rng};
 const TIME_STEP: f32 = 1.0 / 60.0;
 const WIN_WIDTH:f32 = 1600.0;
 const WIN_HEIGHT:f32 = 900.0;
+const PLAYER_RANGE:f32 = WIN_WIDTH + 200.0;
 
 fn main() {
     App::new()
@@ -91,7 +92,6 @@ struct AlienMoves {
 impl AlienMoves {
     fn new() -> Self {
         Self {
-            //mood: MoveMood::Classic,
             speed: rnd_vec2(),
             target: None,
         }
@@ -130,23 +130,40 @@ fn move_alien_classic(
         }
         transform.translation += classic_march.vec3();
         match rng.gen_range(0..=10000i32) {
-            //1 => {
-            //    commands.entity(entity).remove::<Classic>();
-            //    commands.entity(entity).insert(Attack);
-            //}
+            1 => {
+                commands.entity(entity).remove::<Classic>().insert(Attack);
+            }
             2 => {                
-                commands.entity(entity).remove::<Classic>();
-                commands.entity(entity).insert(Circle);
+                commands.entity(entity).remove::<Classic>().insert(Circle);
             }
             _ => {}
         }
     }
 }
 
-fn move_alien_attack(mut query: Query<(&AlienMoves, &mut Transform), With<Attack>>) {
-    for (moovy, mut transform) in query.iter_mut() {
-                transform.translation += moovy.speed.extend(0.0)
-    }
+fn move_alien_attack(
+    mut commands: Commands,
+        player_query: Query<&Transform, With<Player>>,
+        mut query: Query<(Entity, &mut AlienMoves, &mut Transform), (With<Attack>, Without<Player>)>,
+    ) {
+        let player_pos = player_query.single().translation;
+        for (entity, mut moovy, mut transform) in query.iter_mut() {
+            if let None = moovy.target {
+                moovy.target = Some(player_pos.truncate());
+            }
+            if transform.translation.y <= player_pos.y {
+                moovy.target = Some(Vec2::new(0.0,BOTTOM_CORNER.y));
+            } else if transform.translation.y >= BOTTOM_CORNER.y {
+                // back to the top now, switch to marching classic
+                commands.entity(entity).remove::<Attack>().insert(Classic);
+                moovy.speed = moovy.speed.normalize_or_zero();
+                moovy.target = Some(Vec2::ZERO)
+            }
+            let center = moovy.target.unwrap();
+            circle_mut(&mut moovy.speed, center);
+                    transform.translation += moovy.speed.extend(0.0).normalize_or_zero()*3.0
+        }
+    
 }
 
 fn move_alien_circle(mut query: Query<(&mut AlienMoves, &mut Transform),With<Circle>>) {
@@ -202,6 +219,7 @@ struct Player;
 #[derive(Component)]
 struct Collider;
 
+const BOTTOM_CORNER:Vec2 = const_vec2!([-500.0, 400.0]);
 const EXPLOSION_SIZE:f32 = 8.0;
 const BOLT_COLOR: Color = Color::rgb(1.0, 0.5, 0.0);
 const PLAYER_COLOR: Color = Color::rgb(0.3, 0.3, 0.7);
@@ -237,8 +255,8 @@ fn move_player(
 
     // Update the player position,
     // making sure it doesn't cause the player to leave the arena
-    let left_bound = -WIN_WIDTH / 2.0 + PLAYER_SIZE.x / 2.0;
-    let right_bound = WIN_WIDTH / 2.0 - PLAYER_SIZE.x / 2.0;
+    let left_bound = -PLAYER_RANGE / 2.0 + PLAYER_SIZE.x / 2.0;
+    let right_bound = PLAYER_RANGE / 2.0 - PLAYER_SIZE.x / 2.0;
 
     player_transform.translation.x = new_player_position.clamp(left_bound, right_bound);
     if let BoltExists(false)= *bolt_exists {
@@ -289,7 +307,7 @@ fn move_bolt(
     mut bolt_exists: ResMut<BoltExists>,
     mut query: Query<(Entity, &mut Transform, &Velocity)>) {
     for (entity, mut transform, velocity) in query.iter_mut() {
-        if transform.translation.x.abs() >= WIN_WIDTH / 2.0 
+        if transform.translation.x.abs() >= PLAYER_RANGE / 2.0 
             || transform.translation.y.abs() >= WIN_HEIGHT / 2.0 {
             commands.entity(entity).despawn();
             *bolt_exists = BoltExists(false);
@@ -309,7 +327,6 @@ fn check_for_collisions(
     for bolt_transform in bolt_query.iter() {
         let bolt_size = bolt_transform.scale.truncate();
 
-        // check collision with walls
         for (collider_entity, transform) in collider_query.iter() {
             let collision = collide(
                 bolt_transform.translation,
@@ -430,9 +447,12 @@ fn setup(
                 2,
                 if (column + row) % 2 == 0 { 2 } else { 0 },
                 0.1 + column as f32 / 40.0,
-                Vec3::new((column * 50 - 500) as f32, (-row * 50 + 400) as f32, 0.0),
+                Vec3::new(
+                    (column * 50 ) as f32 + BOTTOM_CORNER.x, 
+                    (-row * 50 ) as f32 + BOTTOM_CORNER.y, 
+                    0.0),
             );
-        }
+        } 
     }
 }
 
