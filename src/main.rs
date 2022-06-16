@@ -161,7 +161,7 @@ fn move_alien_attack(
             }
             let center = moovy.target.unwrap();
             circle_mut(&mut moovy.speed, center);
-                    transform.translation += moovy.speed.extend(0.0).normalize_or_zero()*3.0
+                    transform.translation += moovy.speed.extend(0.0).normalize_or_zero()*8.0
         }
     
 }
