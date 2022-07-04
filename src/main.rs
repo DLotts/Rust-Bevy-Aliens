@@ -10,7 +10,7 @@
 
 use bevy::{prelude::*, render::camera::Camera2d,
     math::{const_vec3, const_vec2},
-    sprite::collide_aabb::{collide},};
+    sprite::collide_aabb::{collide}, app::AppExit,};
 use rand::{thread_rng, Rng};
 
 // Defines the amount of time that should elapse between each physics step.
@@ -39,6 +39,7 @@ fn main() {
         .add_system(move_alien_classic)
         .add_system(move_alien_circle)
         .add_system(move_alien_attack)
+        .add_system(collide_alien_attack)
         .add_system(move_player)
         .add_system(move_bolt)
         .add_system(player_camera_control)
@@ -130,22 +131,24 @@ fn move_alien_classic(
         }
         transform.translation += classic_march.vec3();
         match rng.gen_range(0..=10000i32) {
-            1 => {
-                commands.entity(entity).remove::<Classic>().insert(Attack);
-            }
-            2 => {                
+            1 => {                
                 commands.entity(entity).remove::<Classic>().insert(Circle);
+            }
+            2..=5 => {
+                commands.entity(entity).remove::<Classic>().insert(Attack);
             }
             _ => {}
         }
     }
 }
 
+/// move an alien in attack mode, ram the player!
 fn move_alien_attack(
     mut commands: Commands,
         player_query: Query<&Transform, With<Player>>,
         mut query: Query<(Entity, &mut AlienMoves, &mut Transform), (With<Attack>, Without<Player>)>,
     ) {
+        // TODO if no player, use another life or end the game.
         let player_pos = player_query.single().translation;
         for (entity, mut moovy, mut transform) in query.iter_mut() {
             if let None = moovy.target {
@@ -153,7 +156,7 @@ fn move_alien_attack(
             }
             if transform.translation.y <= player_pos.y {
                 moovy.target = Some(Vec2::new(0.0,BOTTOM_CORNER.y));
-            } else if transform.translation.y >= BOTTOM_CORNER.y {
+            } else if transform.translation.y >= BOTTOM_CORNER.y - 2.0 * MARCH_SPACING.y {
                 // back to the top now, switch to marching classic
                 commands.entity(entity).remove::<Attack>().insert(Classic);
                 moovy.speed = moovy.speed.normalize_or_zero();
@@ -220,6 +223,7 @@ struct Player;
 struct Collider;
 
 const BOTTOM_CORNER:Vec2 = const_vec2!([-500.0, 400.0]);
+const MARCH_SPACING:Vec2 = const_vec2!([50.0,50.0]);
 const EXPLOSION_SIZE:f32 = 8.0;
 const BOLT_COLOR: Color = Color::rgb(1.0, 0.5, 0.0);
 const PLAYER_COLOR: Color = Color::rgb(0.3, 0.3, 0.7);
@@ -318,15 +322,42 @@ fn move_bolt(
     }
 }
 
+/// iterate for each player (just one) and each alien in attack mode and look for collisions.
+fn collide_alien_attack(
+    mut exit: EventWriter<AppExit>,
+    mut commands: Commands,
+    player_query: Query<(Entity, &Transform), With<Player>>,
+    alien_query: Query<(Entity, &mut Transform), (With<Attack>, Without<Player>)>,
+    mut collision_events: EventWriter<CollisionEvent>,
+) {
+for (player_entity, player_transform) in player_query.iter() {
+    let player_size = player_transform.scale.truncate();
+    for (alien_entity, alien_transform) in alien_query.iter() {
+        let collision = collide(
+            player_transform.translation,
+            player_size,
+            alien_transform.translation,
+            alien_transform.scale.truncate() * 8.0,
+        );
+        if let Some(_/*collision*/) = collision {
+            // Sends a collision event so that other systems can react to the collision
+            collision_events.send(CollisionEvent { pos: alien_transform.translation });
+            commands.entity(alien_entity).despawn();
+            commands.entity(player_entity).despawn();
+            exit.send(AppExit);
+        }
+    }
+}
+}
+/// iterate thru all player's bolts and every alien to find collisions.
 fn check_for_collisions(
     mut commands: Commands,
-    bolt_query: Query<&Transform, With<Bolt>>,
+    bolt_query: Query<(Entity, &Transform), With<Bolt>>,
     collider_query: Query<(Entity, &Transform), With<Collider>>,
     mut collision_events: EventWriter<CollisionEvent>,
 ) {
-    for bolt_transform in bolt_query.iter() {
+    for (bolt_entity,bolt_transform) in bolt_query.iter() {
         let bolt_size = bolt_transform.scale.truncate();
-
         for (collider_entity, transform) in collider_query.iter() {
             let collision = collide(
                 bolt_transform.translation,
@@ -338,6 +369,7 @@ fn check_for_collisions(
                 // Sends a collision event so that other systems can react to the collision
                 collision_events.send(CollisionEvent { pos: transform.translation });
                 commands.entity(collider_entity).despawn();
+                commands.entity(bolt_entity).despawn();
             }
         }
     }
@@ -448,8 +480,8 @@ fn setup(
                 if (column + row) % 2 == 0 { 2 } else { 0 },
                 0.1 + column as f32 / 40.0,
                 Vec3::new(
-                    (column * 50 ) as f32 + BOTTOM_CORNER.x, 
-                    (-row * 50 ) as f32 + BOTTOM_CORNER.y, 
+                    (column * MARCH_SPACING.x as i32 ) as f32 + BOTTOM_CORNER.x, 
+                    (-row * MARCH_SPACING.y as i32 ) as f32 + BOTTOM_CORNER.y, 
                     0.0),
             );
         } 
